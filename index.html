@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clock</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Clock">
+<meta name="format-detection" content="telephone=no">
+<meta name="robots" content="noindex, nofollow">
+<!--
+  Always-on dashboard for an old iPad (written for Safari on iOS 10).
+  Plain HTML, CSS and old-style JavaScript on purpose: no libraries, no web fonts.
+  Settings you may want to change are at the top of the script, under CONFIG.
+-->
+<style>
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; }
+body {
+  position: fixed; left: 0; top: 0; width: 100%; height: 100%;
+  font-family: "Avenir Next", Avenir, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-weight: 400;
+  color: #D5DEEA; color: var(--ink);
+  background-color: #0F1829; background-color: var(--bg);
+  background-image: linear-gradient(to bottom, var(--bg), var(--bg2));
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: rgba(0,0,0,0);
+  cursor: default;
+}
+
+/* The page follows Boston's daylight: pale by day, warm at sunrise and sunset,
+   dark after sunset, and nearly black in the small hours. */
+body.t-day {
+  --bg: #DCE7EF; --bg2: #EEF2F1; --ink: #16242F; --muted: #5A6A77;
+  --line: rgba(22,36,47,.16); --accent: #A63F16;
+  --tr-sleep: #3A4A57; --tr-wake: #A7B4BD; --tr-work: #FFFFFF;
+}
+body.t-twilight {
+  --bg: #262C52; --bg2: #8F566A; --ink: #F6ECE2; --muted: #D2C5CE;
+  --line: rgba(246,236,226,.22); --accent: #FFC078;
+  --tr-sleep: #151936; --tr-wake: #6F6590; --tr-work: #F3DFCF;
+}
+body.t-night {
+  --bg: #0F1829; --bg2: #141F33; --ink: #D5DEEA; --muted: #8090A8;
+  --line: rgba(213,222,234,.14); --accent: #F0A63A;
+  --tr-sleep: #1D2A42; --tr-wake: #4A5B78; --tr-work: #AEBBD0;
+}
+body.t-deep {
+  --bg: #000000; --bg2: #000000; --ink: #69748A; --muted: #434D5F;
+  --line: rgba(105,116,138,.2); --accent: #8C6223;
+  --tr-sleep: #0E131D; --tr-wake: #232C3B; --tr-work: #4A566A;
+}
+
+.num {
+  font-family: "DIN Alternate", "DIN Condensed", "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  font-weight: bold;
+}
+.dg { display: inline-block; width: .58em; text-align: center; }
+.cl { display: inline-block; width: .3em; text-align: center; position: relative; top: -.07em; }
+
+/* A 64 x 48 unit canvas (1024 x 768 on the iPad), scaled to the screen by the script. */
+.stage {
+  position: absolute; left: 50%; top: 50%;
+  width: 64rem; height: 48rem; margin: -24rem 0 0 -32rem;
+  box-sizing: border-box; padding: 2rem 2rem 1.25rem 2rem;
+  display: -webkit-flex; display: flex;
+}
+.left {
+  width: 35rem; -webkit-flex: none; flex: none;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+}
+.rail {
+  -webkit-flex: 1; flex: 1; min-width: 0; min-height: 0;
+  margin-left: 2rem; padding-left: 2rem;
+  border-left: 1px solid var(--line);
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+}
+
+/* Home clock */
+.now-date {
+  display: -webkit-flex; display: flex;
+  -webkit-justify-content: space-between; justify-content: space-between;
+  -webkit-align-items: baseline; align-items: baseline;
+  font-size: 1.75rem; font-weight: 500; line-height: 2.4rem;
+}
+.now-city { font-size: 1.2rem; color: var(--muted); }
+.now-time { font-size: 11.5rem; line-height: 1; height: 11rem; white-space: nowrap; }
+.side { display: inline-block; position: relative; font-size: 2.5rem; line-height: 1; margin-left: .9rem; }
+.ap { font-weight: 600; }
+.sec { position: absolute; left: 0; bottom: 6.55rem; font-size: 2.25rem; color: var(--muted); }
+
+/* Other cities */
+.world {
+  display: -webkit-flex; display: flex;
+  border-top: 1px solid var(--line); margin-top: 1.1rem; padding-top: 1.1rem;
+}
+.city { -webkit-flex: 1; flex: 1; min-width: 0; margin-right: 1.75rem; }
+.city:last-child { margin-right: 0; }
+.city-name { font-size: 1.2rem; font-weight: 600; line-height: 1.6rem; }
+.city-time { font-size: 3.1rem; line-height: 3.7rem; white-space: nowrap; }
+.city-ap { font-family: "Avenir Next", Avenir, "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 1.1rem; font-weight: 600; margin-left: .3rem; }
+.city-day { font-size: .95rem; line-height: 1.4rem; color: var(--muted); white-space: nowrap; }
+/* One bar per city showing its 24 hours: darkest is sleep, brightest is office hours. */
+.bar { position: relative; height: .45rem; margin-top: .7rem; border-radius: .25rem; background: var(--tr-sleep); }
+.bar i { position: absolute; top: 0; bottom: 0; display: block; }
+.bar .wake { left: 29.17%; right: 4.17%; background: var(--tr-wake); }
+.bar .work { left: 37.5%; right: 25%; background: var(--tr-work); }
+.bar .dot {
+  top: 50%; bottom: auto; width: .95rem; height: .95rem; margin: -.475rem 0 0 -.475rem;
+  border-radius: 50%; background: var(--accent);
+}
+
+/* Weather */
+.wx {
+  -webkit-flex: 1; flex: 1; min-height: 0;
+  display: -webkit-flex; display: flex;
+  border-top: 1px solid var(--line); margin-top: 1.3rem; padding-top: 1.1rem;
+}
+.wx-now { width: 12rem; -webkit-flex: none; flex: none; }
+.wx-main { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; height: 5.2rem; }
+.wx-icon { width: 3.5rem; height: 3.5rem; margin-right: .7rem; -webkit-flex: none; flex: none; }
+.wx-temp { font-size: 5.2rem; line-height: 1; white-space: nowrap; }
+.wx-desc { font-size: 1.3rem; font-weight: 600; line-height: 1.7rem; margin-top: .6rem; }
+.wx-sub { font-size: .95rem; line-height: 1.45rem; color: var(--muted); }
+.wx-fc {
+  -webkit-flex: 1; flex: 1; min-width: 0; margin-left: 1.5rem;
+  display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
+}
+.wx-row { display: -webkit-flex; display: flex; }
+.wx-row + .wx-row { border-top: 1px solid var(--line); margin-top: .55rem; padding-top: .65rem; }
+.cell { -webkit-flex: 1; flex: 1; min-width: 0; text-align: center; }
+.cell-label { font-size: .9rem; line-height: 1.2rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.cell-icon { width: 1.9rem; height: 1.9rem; margin: .25rem auto .15rem auto; }
+.cell-temp { font-size: 1.3rem; line-height: 1.5rem; white-space: nowrap; }
+.cell-lo { display: block; font-size: 1.05rem; line-height: 1.25rem; color: var(--muted); }
+.cell-pop { font-size: .8rem; line-height: 1.1rem; height: 1.1rem; color: var(--muted); }
+svg.ic { display: block; width: 100%; height: 100%; }
+
+/* Calendar */
+.agenda { -webkit-flex: 1; flex: 1; min-height: 0; overflow: hidden; }
+.day { font-size: 1.2rem; font-weight: 600; line-height: 1.6rem; margin: 1.25rem 0 .45rem 0; }
+.day:first-child { margin-top: 0; }
+.day-date { font-weight: 400; color: var(--muted); margin-left: .5rem; }
+.ev { position: relative; display: -webkit-flex; display: flex; padding: .4rem 0 .4rem .85rem; }
+.ev-bar { position: absolute; left: 0; top: .5rem; bottom: .5rem; width: .22rem; border-radius: .11rem; background: var(--muted); display: block; }
+.t-deep .ev-bar { opacity: .4; }
+.ev-time { width: 5.3rem; -webkit-flex: none; flex: none; font-size: 1rem; font-weight: 600; line-height: 1.5rem; white-space: nowrap; }
+.ev-body { -webkit-flex: 1; flex: 1; min-width: 0; }
+.ev-title {
+  font-size: 1.1rem; font-weight: 500; line-height: 1.5rem; max-height: 3rem; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+}
+.ev-sub { font-size: .85rem; line-height: 1.25rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev.is-now .ev-time { color: var(--accent); }
+.ev-soon { color: var(--accent); }
+.note { font-size: 1rem; line-height: 1.5rem; color: var(--muted); }
+.more { font-size: .85rem; line-height: 1.25rem; color: var(--muted); margin-top: .7rem; }
+.connect {
+  display: inline-block; margin-top: 1rem; padding: .6rem 1.1rem; border-radius: .4rem;
+  border: 1px solid var(--ink); font-size: 1rem; font-weight: 600; cursor: pointer;
+}
+
+.stamp { font-size: .8rem; line-height: 1.1rem; height: 1.1rem; margin-top: .6rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stamp.warn { color: var(--accent); }
+#calStamp { cursor: pointer; }
+#diag { display: none; }
+#diag.on { display: block; }
+
+/* Calendar setup panel */
+.setup { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,.6); display: none; }
+.setup.open { display: block; }
+.setup-card {
+  position: absolute; left: 50%; top: 2.5rem; width: 36rem; margin-left: -18rem;
+  box-sizing: border-box; padding: 1.75rem; border-radius: .75rem;
+  background: #FFFFFF; color: #16242F;
+}
+.setup-card h2 { margin: 0 0 .5rem 0; font-size: 1.5rem; font-weight: 600; }
+.setup-card p { margin: 0 0 1rem 0; font-size: 1rem; line-height: 1.5rem; color: #44525E; }
+.setup-card input {
+  display: block; width: 100%; box-sizing: border-box; padding: .7rem .8rem;
+  font-family: inherit; font-size: 1rem; color: #16242F; background: #FFFFFF;
+  border: 1px solid #8C9AA5; border-radius: .4rem;
+  -webkit-appearance: none; -webkit-user-select: text; user-select: text;
+}
+.setup-err { min-height: 1.4rem; margin: .5rem 0 0 0; font-size: .9rem; line-height: 1.4rem; color: #A63F16; }
+.setup-actions { margin-top: .75rem; }
+.btn {
+  display: inline-block; margin-right: .6rem; padding: .65rem 1.1rem; border-radius: .4rem;
+  font-family: inherit; font-size: 1rem; font-weight: 600; cursor: pointer;
+  border: 1px solid #16242F; background: #FFFFFF; color: #16242F; -webkit-appearance: none;
+}
+.btn.primary { background: #16242F; color: #FFFFFF; }
+.btn.quiet { border-color: transparent; color: #44525E; }
+
+/* Portrait: the same blocks, stacked. */
+.portrait .stage { width: 48rem; height: 64rem; margin: -32rem 0 0 -24rem; -webkit-flex-direction: column; flex-direction: column; }
+.portrait .left { width: auto; }
+.portrait .now-time { font-size: 9.5rem; height: 9.1rem; }
+.portrait .sec { bottom: 5.2rem; }
+.portrait .wx { -webkit-flex: none; flex: none; }
+.portrait .wx-now { width: 14rem; }
+.portrait .rail { margin-left: 0; padding-left: 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 1.1rem; padding-top: 1.2rem; }
+</style>
+</head>
+<body class="t-night">
+
+<div class="stage" id="stage">
+  <div class="left">
+    <div class="now-date"><span id="date"></span><span class="now-city" id="homeName"></span></div>
+    <div class="now-time"><span class="num" id="big"></span><span class="side"><span class="num sec" id="sec"></span><span class="ap" id="ap"></span></span></div>
+
+    <div class="world" id="world"></div>
+
+    <div class="wx">
+      <div class="wx-now">
+        <div class="wx-main"><div class="wx-icon" id="wxIcon"></div><div class="num wx-temp" id="wxTemp"></div></div>
+        <div class="wx-desc" id="wxDesc"></div>
+        <div class="wx-sub" id="wxSub1"></div>
+        <div class="wx-sub" id="wxSub2"></div>
+        <div class="wx-sub" id="wxSub3"></div>
+      </div>
+      <div class="wx-fc">
+        <div class="wx-row" id="wxHours"></div>
+        <div class="wx-row" id="wxDays"></div>
+      </div>
+    </div>
+    <div class="stamp" id="wxStamp"></div>
+    <div class="stamp warn" id="diag"></div>
+  </div>
+
+  <div class="rail" id="rail">
+    <div class="agenda" id="agenda"></div>
+    <div class="stamp" id="calStamp"></div>
+  </div>
+</div>
+
+<div class="setup" id="setup">
+  <div class="setup-card">
+    <h2>Connect your calendar</h2>
+    <p>Paste the feed address from Google Apps Script. It starts with https://script.google.com/macros/s/ and ends with ?key= followed by your key.</p>
+    <input id="feedInput" type="url" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" placeholder="https://script.google.com/macros/s/&hellip;/exec?key=&hellip;">
+    <p class="setup-err" id="setupErr"></p>
+    <div class="setup-actions">
+      <button type="button" class="btn primary" id="setupSave">Connect calendar</button>
+      <button type="button" class="btn" id="setupCancel">Cancel</button>
+      <button type="button" class="btn quiet" id="setupRemove">Disconnect calendar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===================== Settings you may want to change ===================== */
+var CONFIG = {
+  /* The big clock, the weather and the calendar all use the home city. */
+  home: { name: 'Boston', zone: 'us-eastern', lat: 42.36, lon: -71.07 },
+  /* The three small clocks. Zones available: us-eastern, eu-central, china, japan
+     (add more to ZONES below). */
+  cities: [
+    { name: 'Beijing', zone: 'china' },
+    { name: 'Tokyo', zone: 'japan' },
+    { name: 'Copenhagen', zone: 'eu-central' }
+  ],
+  hour12: true,               /* false gives 17:50 instead of 5:50 pm */
+  fahrenheit: true,           /* false gives Celsius and km/h */
+  weatherMinutes: 20,         /* how often to fetch the weather */
+  calendarMinutes: 5,         /* how often to fetch the calendar */
+  dimFrom: 23 * 60,           /* nearly-black screen from 11:00 pm ... */
+  dimUntil: 5 * 60 + 30,      /* ... until 5:30 am */
+  reloadAt: 4 * 60 + 5        /* full page reload at 4:05 am */
+};
+
+/* Time zones are worked out here rather than taken from the iPad, whose own
+   time zone data stopped updating in 2017. std is minutes ahead of UTC in winter. */
+var ZONES = {
+  'us-eastern': { std: -300, dst: 'us' },   /* DST: 2nd Sunday of March to 1st Sunday of November */
+  'eu-central': { std: 60, dst: 'eu' },     /* DST: last Sunday of March to last Sunday of October */
+  'china': { std: 480 },
+  'japan': { std: 540 }
+};
+/* ========================================================================== */
+
+var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+var WD_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+var MON_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+var MIN = 60000, HOUR = 3600000, DAY = 86400000;
+
+/* ----------------------------- small helpers ----------------------------- */
+function nowMs() { return Date.now(); }
+function byId(id) { return document.getElementById(id); }
+function pad2(n) { return (n < 10 ? '0' : '') + n; }
+function el(tag, cls, text) {
+  var n = document.createElement(tag);
+  if (cls) { n.className = cls; }
+  if (text !== undefined && text !== null) { n.appendChild(document.createTextNode(String(text))); }
+  return n;
+}
+function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+function setText(node, text) { if (node.__t !== text) { node.__t = text; clear(node); node.appendChild(document.createTextNode(text)); } }
+function setHTML(node, html) { if (node.__h !== html) { node.__h = html; node.innerHTML = html; } }
+function inRange(m, from, until) { return from <= until ? (m >= from && m < until) : (m >= from || m < until); }
+
+var store = {
+  get: function (key) { try { var v = window.localStorage.getItem('dash.' + key); return v ? JSON.parse(v) : null; } catch (e) { return null; } },
+  set: function (key, value) { try { window.localStorage.setItem('dash.' + key, JSON.stringify(value)); return true; } catch (e) { return false; } },
+  del: function (key) { try { window.localStorage.removeItem('dash.' + key); } catch (e) {} }
+};
+
+function showDiag(text) { var d = byId('diag'); setText(d, text); d.className = 'stamp warn' + (text ? ' on' : ''); }
+window.onerror = function (msg, src, line) { if (line) { showDiag('Page error: ' + msg + ' (line ' + line + ')'); } };
+
+/* ------------------------------ time zones ------------------------------ */
+function sundayOnOrAfter(y, m, d) { var wd = new Date(Date.UTC(y, m, d)).getUTCDay(); return d + ((7 - wd) % 7); }
+function lastSunday(y, m) { var last = new Date(Date.UTC(y, m + 1, 0)); return last.getUTCDate() - last.getUTCDay(); }
+function offsetMin(zone, ms) {
+  var z = ZONES[zone], y, start, end;
+  if (!z.dst) { return z.std; }
+  y = new Date(ms).getUTCFullYear();
+  if (z.dst === 'us') {
+    start = Date.UTC(y, 2, sundayOnOrAfter(y, 2, 8), 2, 0) - z.std * MIN;
+    end = Date.UTC(y, 10, sundayOnOrAfter(y, 10, 1), 2, 0) - (z.std + 60) * MIN;
+  } else {
+    start = Date.UTC(y, 2, lastSunday(y, 2), 1, 0);
+    end = Date.UTC(y, 9, lastSunday(y, 9), 1, 0);
+  }
+  return (ms >= start && ms < end) ? z.std + 60 : z.std;
+}
+/* Clock-on-the-wall reading for a zone at a given instant. */
+function wall(zone, ms) {
+  var off = offsetMin(zone, ms), local = ms + off * MIN, d = new Date(local);
+  return {
+    y: d.getUTCFullYear(), mo: d.getUTCMonth(), d: d.getUTCDate(), wd: d.getUTCDay(),
+    h: d.getUTCHours(), mi: d.getUTCMinutes(), s: d.getUTCSeconds(),
+    min: d.getUTCHours() * 60 + d.getUTCMinutes(),
+    dayNum: Math.floor(local / DAY), off: off
+  };
+}
+function weekdayOf(dayNum) { return ((dayNum + 4) % 7 + 7) % 7; }
+function clockParts(h, mi) {
+  if (!CONFIG.hour12) { return { t: pad2(h) + ':' + pad2(mi), ap: '' }; }
+  return { t: (h % 12 || 12) + ':' + pad2(mi), ap: h < 12 ? 'am' : 'pm' };
+}
+function clockText(h, mi) { var p = clockParts(h, mi); return p.ap ? p.t + ' ' + p.ap : p.t; }
+function hourText(h) { return CONFIG.hour12 ? (h % 12 || 12) + ' ' + (h < 12 ? 'am' : 'pm') : pad2(h) + ':00'; }
+function timeAt(ms) { var w = wall(CONFIG.home.zone, ms); return clockText(w.h, w.mi); }
+/* "5:32 pm", or "Sunday 5:32 pm" when it was not today. */
+function whenText(ms, now) {
+  var w = wall(CONFIG.home.zone, ms), n = wall(CONFIG.home.zone, now);
+  return (w.dayNum === n.dayNum ? '' : WEEKDAYS[w.wd] + ' ') + clockText(w.h, w.mi);
+}
+function digits(str) {
+  var out = '', i, c;
+  for (i = 0; i < str.length; i++) {
+    c = str.charAt(i);
+    out += c === ':' ? '<span class="cl">:</span>' : '<span class="dg">' + c + '</span>';
+  }
+  return out;
+}
+
+/* ------------------------------- network ------------------------------- */
+function request(url, cb) {
+  var x = new XMLHttpRequest(), done = false;
+  function finish(err, text) { if (!done) { done = true; cb(err, text); } }
+  try {
+    x.open('GET', url, true);
+    x.timeout = 20000;
+    x.onreadystatechange = function () {
+      if (x.readyState !== 4) { return; }
+      if (x.status >= 200 && x.status < 300) { finish(null, x.responseText); }
+      else { finish(x.status ? 'HTTP ' + x.status : 'no connection'); }
+    };
+    x.ontimeout = function () { finish('timed out'); };
+    x.onerror = function () { finish('no connection'); };
+    x.send(null);
+  } catch (e) { finish('no connection'); }
+}
+function getJSON(url, cb) {
+  request(url, function (err, text) {
+    var data;
+    if (err) { cb(err); return; }
+    try { data = JSON.parse(text); } catch (e) { cb('bad reply'); return; }
+    cb(null, data);
+  });
+}
+/* The calendar feed is loaded as a script because that works in every old browser. */
+var jsonpCount = 0;
+function getJSONP(url, cb) {
+  var name = '__dashFeed' + (++jsonpCount), s = document.createElement('script'), done = false, timer;
+  function finish(err, data) {
+    if (done) { return; }
+    done = true;
+    clearTimeout(timer);
+    window[name] = function () {};
+    if (s.parentNode) { s.parentNode.removeChild(s); }
+    cb(err, data);
+  }
+  window[name] = function (data) { finish(null, data); };
+  s.onerror = function () { finish('no connection'); };
+  s.onload = function () { setTimeout(function () { finish('not a feed'); }, 100); };
+  timer = setTimeout(function () { finish('timed out'); }, 25000);
+  s.src = url + (url.indexOf('?') < 0 ? '?' : '&') + 'callback=' + name + '&t=' + nowMs();
+  document.getElementsByTagName('head')[0].appendChild(s);
+}
+
+/* ------------------------------- layout ------------------------------- */
+function fit() {
+  var w = window.innerWidth, h = window.innerHeight, portrait = h > w;
+  var unit = Math.min(w / (portrait ? 48 : 64), h / (portrait ? 64 : 48));
+  document.documentElement.style.fontSize = unit + 'px';
+  document.documentElement.className = portrait ? 'portrait' : 'landscape';
+  agendaDirty = true;
+}
+
+/* ------------------------------- clocks ------------------------------- */
+var cityNodes = [];
+function buildClocks() {
+  var box = byId('world'), i, c, n, bar, dot;
+  setText(byId('homeName'), CONFIG.home.name);
+  for (i = 0; i < CONFIG.cities.length; i++) {
+    c = el('div', 'city');
+    n = { name: el('div', 'city-name', CONFIG.cities[i].name), time: el('div', 'city-time'), day: el('div', 'city-day') };
+    n.digits = el('span', 'num'); n.ap = el('span', 'city-ap');
+    n.time.appendChild(n.digits); n.time.appendChild(n.ap);
+    bar = el('div', 'bar'); bar.appendChild(el('i', 'wake')); bar.appendChild(el('i', 'work'));
+    dot = el('i', 'dot'); bar.appendChild(dot); n.dot = dot;
+    c.appendChild(n.name); c.appendChild(n.time); c.appendChild(n.day); c.appendChild(bar);
+    box.appendChild(c);
+    cityNodes.push(n);
+  }
+}
+function paintClocks(ms) {
+  var home = wall(CONFIG.home.zone, ms), p = clockParts(home.h, home.mi), i, w, cp, diff, hours, dayWord, gap;
+  setText(byId('date'), WEEKDAYS[home.wd] + ', ' + MONTHS[home.mo] + ' ' + home.d);
+  setHTML(byId('big'), digits(p.t));
+  setText(byId('ap'), p.ap);
+  setHTML(byId('sec'), digits(pad2(home.s)));
+  for (i = 0; i < CONFIG.cities.length; i++) {
+    w = wall(CONFIG.cities[i].zone, ms);
+    cp = clockParts(w.h, w.mi);
+    setHTML(cityNodes[i].digits, digits(cp.t));
+    setText(cityNodes[i].ap, cp.ap);
+    diff = w.dayNum - home.dayNum;
+    dayWord = diff === 0 ? 'Today' : (diff === 1 ? 'Tomorrow' : (diff === -1 ? 'Yesterday' : WEEKDAYS[w.wd]));
+    hours = (w.off - home.off) / 60;
+    gap = hours === 0 ? 'same time' : (Math.abs(hours) + ' h ' + (hours > 0 ? 'ahead' : 'behind'));
+    setText(cityNodes[i].day, dayWord + ', ' + gap);
+    cityNodes[i].dot.style.left = (Math.round(w.min / 1440 * 1000) / 10) + '%';
+  }
+  return home;
+}
+
+/* ------------------------------ daylight ------------------------------ */
+var sun = { rise: 6 * 60 + 30, set: 17 * 60 + 30 };
+function paintTheme(home) {
+  var m = home.min, theme;
+  if (inRange(m, CONFIG.dimFrom, CONFIG.dimUntil)) { theme = 'deep'; }
+  else if (Math.abs(m - sun.rise) <= 30 || Math.abs(m - sun.set) <= 30) { theme = 'twilight'; }
+  else if (m > sun.rise && m < sun.set) { theme = 'day'; }
+  else { theme = 'night'; }
+  if (document.body.className !== 't-' + theme) { document.body.className = 't-' + theme; }
+}
+
+/* ------------------------------- weather ------------------------------- */
+/* Icons adapted from Feather (MIT licence). */
+var ICON = {
+  sun: '<circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>',
+  moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+  cloud: '<path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>',
+  partDay: '<circle cx="7.5" cy="7.5" r="3"/><path d="M7.5 1.6v1.6M1.6 7.5h1.6M3.3 3.3l1.15 1.15M11.7 3.3l-1.15 1.15M3.3 11.7l1.15-1.15M12.6 7.5h.8"/><g transform="translate(5.5 6.5) scale(.72)"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></g>',
+  partNight: '<g transform="translate(1.2 .4) scale(.5)"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></g><g transform="translate(5.5 6.5) scale(.72)"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></g>',
+  rain: '<path d="M16 13v8M8 13v8M12 15v8"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/>',
+  drizzle: '<path d="M8 19v2M8 13v2M16 19v2M16 13v2M12 21v2M12 15v2"/><path d="M20 16.58A5 5 0 0 0 18 7h-1.26A8 8 0 1 0 4 15.25"/>',
+  snow: '<path d="M20 17.58A5 5 0 0 0 18 8h-1.26A8 8 0 1 0 4 16.25"/><path d="M8 16h.01M8 20h.01M12 18h.01M12 22h.01M16 16h.01M16 20h.01"/>',
+  storm: '<path d="M19 16.9A5 5 0 0 0 18 7h-1.26a8 8 0 1 0-11.62 9"/><path d="M13 11l-4 6h6l-4 6"/>',
+  fog: '<path d="M6 7h12M3 11.3h18M5 15.6h14M8 19.9h8"/>'
+};
+function icon(name) {
+  return '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + (ICON[name] || '') + '</svg>';
+}
+/* Weather codes as documented by Open-Meteo (WMO codes). */
+function describe(code, isDay) {
+  switch (code) {
+    case 0: return { text: 'Clear', icon: isDay ? 'sun' : 'moon' };
+    case 1: return { text: 'Mostly clear', icon: isDay ? 'sun' : 'moon' };
+    case 2: return { text: 'Partly cloudy', icon: isDay ? 'partDay' : 'partNight' };
+    case 3: return { text: 'Overcast', icon: 'cloud' };
+    case 45: case 48: return { text: 'Fog', icon: 'fog' };
+    case 51: case 53: case 55: return { text: 'Drizzle', icon: 'drizzle' };
+    case 56: case 57: return { text: 'Freezing drizzle', icon: 'drizzle' };
+    case 61: return { text: 'Light rain', icon: 'rain' };
+    case 63: return { text: 'Rain', icon: 'rain' };
+    case 65: return { text: 'Heavy rain', icon: 'rain' };
+    case 66: case 67: return { text: 'Freezing rain', icon: 'rain' };
+    case 71: return { text: 'Light snow', icon: 'snow' };
+    case 73: return { text: 'Snow', icon: 'snow' };
+    case 75: return { text: 'Heavy snow', icon: 'snow' };
+    case 77: return { text: 'Snow', icon: 'snow' };
+    case 80: return { text: 'Light showers', icon: 'rain' };
+    case 81: return { text: 'Showers', icon: 'rain' };
+    case 82: return { text: 'Heavy showers', icon: 'rain' };
+    case 85: case 86: return { text: 'Snow showers', icon: 'snow' };
+    case 95: case 96: case 97: case 99: return { text: 'Thunderstorm', icon: 'storm' };
+  }
+  return { text: '', icon: '' };
+}
+function deg(v) { return (typeof v === 'number' && isFinite(v)) ? Math.round(v) + '\u00B0' : '\u2013'; }
+function at(list, i) { return (list && i >= 0 && i < list.length) ? list[i] : undefined; }
+
+var weather = null;          /* { at: when fetched, data: reply from the weather service } */
+var wxBusy = false, wxNext = 0, wxError = '';
+function weatherUrl() {
+  var h = CONFIG.home, tzName = { 'us-eastern': 'America%2FNew_York', 'eu-central': 'Europe%2FCopenhagen', 'china': 'Asia%2FShanghai', 'japan': 'Asia%2FTokyo' }[h.zone] || 'auto';
+  return 'https://api.open-meteo.com/v1/forecast?latitude=' + h.lat + '&longitude=' + h.lon +
+    '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,is_day' +
+    '&hourly=temperature_2m,weather_code,precipitation_probability,is_day' +
+    '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset' +
+    (CONFIG.fahrenheit ? '&temperature_unit=fahrenheit&wind_speed_unit=mph' : '') +
+    '&timezone=' + tzName + '&forecast_days=8&timeformat=unixtime';
+}
+function loadWeather() {
+  wxBusy = true;
+  getJSON(weatherUrl(), function (err, data) {
+    var ms = nowMs();
+    wxBusy = false;
+    if (!err && (!data || data.error || !data.hourly || !data.daily)) { err = (data && data.reason) ? String(data.reason) : 'bad reply'; }
+    if (err) { wxError = err; wxNext = ms + 2 * MIN; }
+    else { wxError = ''; weather = { at: ms, data: data }; store.set('weather', weather); wxNext = ms + CONFIG.weatherMinutes * MIN; }
+    paintWeather(ms);
+    paintTheme(wall(CONFIG.home.zone, ms));
+  });
+}
+function forecastCell(label, iconName, tempNode, pop) {
+  var c = el('div', 'cell'), ic = el('div', 'cell-icon');
+  c.appendChild(el('div', 'cell-label', label));
+  ic.innerHTML = iconName ? icon(iconName) : '';
+  c.appendChild(ic);
+  c.appendChild(tempNode);
+  c.appendChild(el('div', 'cell-pop', (typeof pop === 'number' && pop >= 20) ? Math.round(pop) + '%' : ''));
+  return c;
+}
+function paintWeather(ms) {
+  var stamp = byId('wxStamp'), hours = byId('wxHours'), days = byId('wxDays');
+  var home = wall(CONFIG.home.zone, ms), d, cur, H, D, off, i, hi = -1, di = -1, fresh, temp, code, isDay, info, k, idx, w, t, hiLo, stale, riseW, setW;
+  clear(hours); clear(days);
+  if (!weather) {
+    setHTML(byId('wxIcon'), ''); setText(byId('wxTemp'), ''); setText(byId('wxSub1'), ''); setText(byId('wxSub2'), ''); setText(byId('wxSub3'), '');
+    setText(byId('wxDesc'), wxError ? 'Weather isn\u2019t loading' : 'Loading weather');
+    setText(stamp, wxError ? 'Can\u2019t reach the weather service. Check the Wi-Fi.' : '');
+    stamp.className = 'stamp' + (wxError ? ' warn' : '');
+    return;
+  }
+  d = weather.data; cur = d.current || {}; H = d.hourly || {}; D = d.daily || {};
+  off = d.utc_offset_seconds || 0;
+  for (i = 0; H.time && i < H.time.length; i++) { if (H.time[i] * 1000 <= ms && ms < H.time[i] * 1000 + HOUR) { hi = i; break; } }
+  for (i = 0; D.time && i < D.time.length; i++) { if (Math.round((D.time[i] + off) / 86400) === home.dayNum) { di = i; break; } }
+
+  /* Right now: the service's current reading while it is fresh, otherwise this hour's forecast. */
+  fresh = (ms - weather.at) < 45 * MIN && typeof cur.temperature_2m === 'number';
+  temp = fresh ? cur.temperature_2m : at(H.temperature_2m, hi);
+  code = fresh ? cur.weather_code : at(H.weather_code, hi);
+  isDay = fresh ? cur.is_day : at(H.is_day, hi);
+  if (isDay === undefined) { isDay = (home.min > sun.rise && home.min < sun.set) ? 1 : 0; }
+  info = describe(code, !!isDay);
+  setHTML(byId('wxIcon'), info.icon ? icon(info.icon) : '');
+  setText(byId('wxTemp'), deg(temp));
+  setText(byId('wxDesc'), info.text);
+  setText(byId('wxSub1'), (fresh && typeof cur.apparent_temperature === 'number')
+    ? 'Feels like ' + deg(cur.apparent_temperature) + (typeof cur.wind_speed_10m === 'number' ? ', wind ' + Math.round(cur.wind_speed_10m) + (CONFIG.fahrenheit ? ' mph' : ' km/h') : '')
+    : '');
+  hiLo = di >= 0 ? 'High ' + deg(at(D.temperature_2m_max, di)) + ', low ' + deg(at(D.temperature_2m_min, di)) : '';
+  setText(byId('wxSub2'), hiLo);
+  t = '';
+  if (di >= 0 && at(D.sunrise, di) && at(D.sunset, di)) {
+    riseW = wall(CONFIG.home.zone, D.sunrise[di] * 1000); setW = wall(CONFIG.home.zone, D.sunset[di] * 1000);
+    sun = { rise: riseW.min, set: setW.min };
+    t = home.min < riseW.min ? 'Sunrise ' + clockText(riseW.h, riseW.mi) : (home.min < setW.min ? 'Sunset ' + clockText(setW.h, setW.mi) : '');
+    if (!t && at(D.sunrise, di + 1)) { w = wall(CONFIG.home.zone, D.sunrise[di + 1] * 1000); t = 'Sunrise ' + clockText(w.h, w.mi); }
+  }
+  setText(byId('wxSub3'), t);
+
+  /* Next twelve hours, every second hour. */
+  for (k = 0; k < 6; k++) {
+    idx = hi >= 0 ? hi + 1 + 2 * k : -1;
+    if (at(H.time, idx) === undefined) { hours.appendChild(el('div', 'cell')); continue; }
+    w = wall(CONFIG.home.zone, H.time[idx] * 1000);
+    info = describe(at(H.weather_code, idx), !!at(H.is_day, idx));
+    hours.appendChild(forecastCell(hourText(w.h), info.icon, el('div', 'cell-temp num', deg(at(H.temperature_2m, idx))), at(H.precipitation_probability, idx)));
+  }
+  /* Next six days. */
+  for (k = 1; k <= 6; k++) {
+    idx = di >= 0 ? di + k : -1;
+    if (at(D.time, idx) === undefined) { days.appendChild(el('div', 'cell')); continue; }
+    info = describe(at(D.weather_code, idx), true);
+    t = el('div', 'cell-temp num', deg(at(D.temperature_2m_max, idx)));
+    t.appendChild(el('span', 'cell-lo', deg(at(D.temperature_2m_min, idx))));
+    days.appendChild(forecastCell(WD_SHORT[weekdayOf(home.dayNum + k)], info.icon, t, at(D.precipitation_probability_max, idx)));
+  }
+
+  stale = (ms - weather.at) > 3 * CONFIG.weatherMinutes * MIN;
+  setText(stamp, stale ? 'Weather is from ' + whenText(weather.at, ms) + '. Can\u2019t reach the weather service; check the Wi-Fi.' : 'Weather updated ' + whenText(weather.at, ms));
+  stamp.className = 'stamp' + (stale ? ' warn' : '');
+}
+
+/* ------------------------------- calendar ------------------------------- */
+var FEED_PATTERN = /^https:\/\/script\.google\.com\/(a\/macros\/[A-Za-z0-9.\-]+|macros)\/s\/[A-Za-z0-9_\-]+\/exec(\?[A-Za-z0-9_=&.%\-]*)?$/;
+var feedUrl = '';
+var cal = null;              /* { at: when fetched, events: [...] } */
+var calBusy = false, calNext = 0, calError = '', agendaDirty = true;
+
+function readFeedSetting() {
+  var saved = store.get('feed'), fromLink = '';
+  try { fromLink = decodeURIComponent((window.location.hash || '').replace(/^#/, '')); } catch (e) { fromLink = ''; }
+  if (typeof saved === 'string' && FEED_PATTERN.test(saved)) { return saved; }
+  /* First-time setup can also arrive as  page-address#feed-address . */
+  if (FEED_PATTERN.test(fromLink)) { store.set('feed', fromLink); return fromLink; }
+  return '';
+}
+function loadCalendar() {
+  calBusy = true;
+  getJSONP(feedUrl, function (err, data) {
+    var ms = nowMs();
+    calBusy = false;
+    if (!err && (!data || data.ok !== true || !data.events)) { err = (data && data.error) ? 'feed: ' + data.error : 'not a feed'; }
+    if (err) {
+      calError = err;
+      calNext = ms + ((err === 'no connection' || err === 'timed out') ? 1 : CONFIG.calendarMinutes) * MIN;
+    } else {
+      calError = ''; cal = { at: ms, events: data.events }; store.set('cal', cal);
+      calNext = ms + CONFIG.calendarMinutes * MIN;
+    }
+    paintAgenda(ms);
+  });
+}
+function calProblem() {
+  if (!calError) { return ''; }
+  if (calError === 'no connection' || calError === 'timed out') { return 'Can\u2019t reach the calendar. Check the Wi-Fi.'; }
+  if (calError === 'feed: wrong key') { return 'The feed refused the key. Tap here and paste the address again, ending in ?key=\u2026'; }
+  if (calError === 'not a feed') { return 'The feed answered without events. Check the web app\u2019s access is set to Anyone.'; }
+  return 'The calendar script reported a problem: ' + calError.replace(/^feed: /, '');
+}
+function dayNumOf(str) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(str || ''));
+  return m ? Math.floor(Date.UTC(+m[1], +m[2] - 1, +m[3]) / DAY) : NaN;
+}
+function placeText(where) {
+  var s = String(where || '').split('\n')[0];
+  if (/zoom\.us/i.test(s)) { return 'Zoom'; }
+  if (/meet\.google/i.test(s)) { return 'Google Meet'; }
+  if (/teams\.(microsoft|live)/i.test(s)) { return 'Teams'; }
+  if (/^https?:/i.test(s)) { return ''; }
+  return s;
+}
+function joinBits(a, b) { return a && b ? a + ', ' + b : (a || b || ''); }
+function eventRow(it, ms, today) {
+  var ev = it.ev, row = el('div', 'ev'), bar = el('i', 'ev-bar'), time = el('div', 'ev-time'), body = el('div', 'ev-body');
+  var sub = '', soon = '', e, mins, place = placeText(ev.where);
+  if (/^#[0-9a-fA-F]{3,8}$/.test(String(ev.color || ''))) { bar.style.background = ev.color; }
+  if (it.allDay) {
+    setText(time, 'all day');
+    if (it.lastDay > it.day) { sub = 'through ' + WEEKDAYS[weekdayOf(it.lastDay)]; }
+  } else {
+    e = wall(CONFIG.home.zone, ev.end);
+    sub = 'until ' + (e.dayNum !== it.day ? WD_SHORT[e.wd] + ' ' : '') + clockText(e.h, e.mi);
+    if (ev.start <= ms) { setText(time, 'now'); row.className = 'ev is-now'; }
+    else {
+      setText(time, timeAt(ev.start));
+      mins = Math.ceil((ev.start - ms) / MIN);
+      if (it.day === today && mins <= 60) { soon = 'in ' + mins + ' min'; sub = ''; }
+    }
+  }
+  body.appendChild(el('div', 'ev-title', ev.title || '(No title)'));
+  if (soon || sub || place) {
+    e = el('div', 'ev-sub');
+    if (soon) { e.appendChild(el('span', 'ev-soon', soon)); }
+    e.appendChild(document.createTextNode((soon && place ? ', ' : '') + joinBits(sub, place)));
+    body.appendChild(e);
+  }
+  row.appendChild(bar); row.appendChild(time); row.appendChild(body);
+  return row;
+}
+function paintAgenda(ms) {
+  var box = byId('agenda'), stamp = byId('calStamp'), home = wall(CONFIG.home.zone, ms), today = home.dayNum;
+  var items = [], i, ev, s, e, it, lastDay = null, head, hidden = 0, more = null, guard = 0, last, btn, problem, d;
+  agendaDirty = false;
+  clear(box);
+  if (!feedUrl) {
+    box.appendChild(el('div', 'day', 'Calendar'));
+    box.appendChild(el('div', 'note', 'Your calendar isn\u2019t connected yet.'));
+    btn = el('div', 'connect', 'Connect calendar'); btn.onclick = openSetup; box.appendChild(btn);
+    setText(stamp, ''); stamp.className = 'stamp';
+    return;
+  }
+  problem = calProblem();
+  if (!cal) {
+    box.appendChild(el('div', 'day', 'Calendar'));
+    box.appendChild(el('div', 'note', problem ? 'No events to show yet.' : 'Loading your calendar'));
+    setText(stamp, problem); stamp.className = 'stamp' + (problem ? ' warn' : '');
+    return;
+  }
+  for (i = 0; i < cal.events.length; i++) {
+    ev = cal.events[i];
+    if (!ev) { continue; }
+    if (ev.allDay) {
+      s = dayNumOf(ev.startDay); e = dayNumOf(ev.endDay);
+      if (isNaN(s)) { continue; }
+      if (isNaN(e) || e <= s) { e = s + 1; }
+      if (e <= today) { continue; }
+      it = { ev: ev, allDay: true, day: Math.max(s, today), lastDay: e - 1, sort: 0 };
+    } else {
+      if (typeof ev.start !== 'number' || typeof ev.end !== 'number' || ev.end <= ms) { continue; }
+      it = { ev: ev, allDay: false, day: Math.max(wall(CONFIG.home.zone, ev.start).dayNum, today), sort: ev.start };
+    }
+    if (it.day < today + 7) { items.push(it); }
+  }
+  items.sort(function (a, b) {
+    if (a.day !== b.day) { return a.day - b.day; }
+    if (a.allDay !== b.allDay) { return a.allDay ? -1 : 1; }
+    if (a.sort !== b.sort) { return a.sort - b.sort; }
+    return String(a.ev.title) < String(b.ev.title) ? -1 : 1;
+  });
+  box.appendChild(el('div', 'day', 'Today'));
+  if (!items.length || items[0].day !== today) {
+    box.appendChild(el('div', 'note', items.length ? 'Nothing scheduled' : 'Nothing scheduled this week'));
+  }
+  lastDay = today;
+  for (i = 0; i < items.length; i++) {
+    it = items[i];
+    if (it.day !== lastDay) {
+      lastDay = it.day;
+      d = new Date(it.day * DAY);
+      head = el('div', 'day', it.day === today + 1 ? 'Tomorrow' : WEEKDAYS[weekdayOf(it.day)]);
+      head.appendChild(el('span', 'day-date', MON_SHORT[d.getUTCMonth()] + ' ' + d.getUTCDate()));
+      box.appendChild(head);
+    }
+    box.appendChild(eventRow(it, ms, today));
+  }
+  /* Drop rows from the end until everything fits, and say how many were left out. */
+  while (box.scrollHeight > box.clientHeight + 1 && guard++ < 300) {
+    if (more) { box.removeChild(more); more = null; }
+    last = box.lastChild;
+    if (!last || last === box.firstChild) { break; }
+    if (last.className.indexOf('ev') === 0) { hidden++; }
+    box.removeChild(last);
+    while (box.lastChild && box.lastChild !== box.firstChild && box.lastChild.className === 'day') { box.removeChild(box.lastChild); }
+    more = el('div', 'more', 'and ' + hidden + ' more this week');
+    box.appendChild(more);
+  }
+  if (problem) { setText(stamp, 'Events are from ' + whenText(cal.at, ms) + '. ' + problem); stamp.className = 'stamp warn'; }
+  else { setText(stamp, 'Calendar updated ' + whenText(cal.at, ms)); stamp.className = 'stamp'; }
+}
+
+/* ---------------------------- calendar setup ---------------------------- */
+function openSetup() {
+  byId('feedInput').value = '';
+  setText(byId('setupErr'), '');
+  byId('setupRemove').style.display = feedUrl ? '' : 'none';
+  byId('setup').className = 'setup open';
+}
+function closeSetup() { byId('feedInput').blur(); byId('setup').className = 'setup'; }
+function saveSetup() {
+  var v = String(byId('feedInput').value || '').replace(/^\s+|\s+$/g, '');
+  if (!FEED_PATTERN.test(v)) {
+    setText(byId('setupErr'), 'That isn\u2019t a Google Apps Script web app address. It should start with https://script.google.com/macros/s/ and contain /exec');
+    return;
+  }
+  feedUrl = v; store.set('feed', v);
+  cal = null; store.del('cal'); calError = ''; calNext = 0;
+  closeSetup(); paintAgenda(nowMs());
+}
+function removeSetup() {
+  feedUrl = ''; cal = null; calError = '';
+  store.del('feed'); store.del('cal');
+  if (window.location.hash) { try { window.location.hash = ''; } catch (e) {} }
+  closeSetup(); paintAgenda(nowMs());
+}
+
+/* ------------------------------ heartbeat ------------------------------ */
+var bootMs = nowMs(), lastMinute = -1, reloading = false;
+function maybeReload(ms, home) {
+  if (reloading || ms - bootMs < 2 * HOUR) { return; }
+  if (!inRange(home.min, CONFIG.reloadAt, (CONFIG.reloadAt + 30) % 1440)) { return; }
+  reloading = true;
+  /* Only reload when the page can actually be fetched, so an outage never leaves a blank screen. */
+  request(window.location.href.split('#')[0].split('?')[0] + '?fresh=' + ms, function (err) {
+    if (!err) { window.location.reload(true); }
+    else { setTimeout(function () { reloading = false; }, 5 * MIN); }
+  });
+}
+function tick() {
+  var ms = nowMs(), home, minute;
+  try {
+    home = paintClocks(ms);
+    minute = Math.floor(ms / MIN);
+    if (minute !== lastMinute) {
+      lastMinute = minute;
+      paintWeather(ms);      /* also refreshes today's sunrise and sunset */
+      paintTheme(home);
+      agendaDirty = true;
+      maybeReload(ms, home);
+    }
+    if (agendaDirty) { paintAgenda(ms); }
+    if (!wxBusy && ms >= wxNext) { loadWeather(); }
+    if (feedUrl && !calBusy && ms >= calNext) { loadCalendar(); }
+  } catch (e) {
+    showDiag('Page error: ' + (e && e.message ? e.message : e));
+  }
+  setTimeout(tick, 1000 - (ms % 1000) + 20);
+}
+
+function start() {
+  var saved;
+  fit();
+  window.addEventListener('resize', fit, false);
+  window.addEventListener('orientationchange', function () { setTimeout(fit, 300); }, false);
+  /* No rubber-band scrolling on the wall display. */
+  document.addEventListener('touchmove', function (e) { if (byId('setup').className === 'setup') { e.preventDefault(); } }, false);
+  byId('calStamp').onclick = openSetup;
+  byId('setupSave').onclick = saveSetup;
+  byId('setupCancel').onclick = closeSetup;
+  byId('setupRemove').onclick = removeSetup;
+
+  buildClocks();
+  feedUrl = readFeedSetting();
+  /* Start from the last data we saw, so a restart without Wi-Fi still shows something. */
+  saved = store.get('weather');
+  if (saved && saved.data && typeof saved.at === 'number' && nowMs() - saved.at < 2 * DAY) { weather = saved; }
+  saved = store.get('cal');
+  if (feedUrl && saved && saved.events && typeof saved.at === 'number' && nowMs() - saved.at < 7 * DAY) { cal = saved; }
+  tick();
+}
+start();
+</script>
+</body>
+</html>
