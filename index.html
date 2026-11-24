@@ -119,23 +119,35 @@ body.t-deep {
   border-top: 1px solid var(--line); margin-top: 1.3rem; padding-top: 1.1rem;
 }
 .wx-now { width: 12rem; -webkit-flex: none; flex: none; }
-.wx-main { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; height: 5.2rem; }
-.wx-icon { width: 3.5rem; height: 3.5rem; margin-right: .7rem; -webkit-flex: none; flex: none; }
-.wx-temp { font-size: 5.2rem; line-height: 1; white-space: nowrap; }
-.wx-desc { font-size: 1.3rem; font-weight: 600; line-height: 1.7rem; margin-top: .6rem; }
-.wx-sub { font-size: .95rem; line-height: 1.45rem; color: var(--muted); }
+.wx-main { display: -webkit-flex; display: flex; -webkit-align-items: flex-start; align-items: flex-start; }
+.wx-icon { width: 3.2rem; height: 3.2rem; margin: .6rem .6rem 0 0; -webkit-flex: none; flex: none; }
+.wx-temp { font-size: 4.7rem; line-height: 4.5rem; white-space: nowrap; }
+.wx-temp.long { font-size: 3.3rem; }
+.wx-unit { font-size: 1.5rem; margin-left: .15rem; }
+.wx-temp2 { font-size: 1.5rem; line-height: 1.7rem; margin-top: -.45rem; color: var(--muted); white-space: nowrap; }
+.wx-desc { font-size: 1.3rem; font-weight: 600; line-height: 1.7rem; margin-top: .4rem; }
+.wx-sub { font-size: .95rem; line-height: 1.35rem; color: var(--muted); }
 .wx-fc {
-  -webkit-flex: 1; flex: 1; min-width: 0; margin-left: 1.5rem;
+  -webkit-flex: 1; flex: 1; min-width: 0; margin-left: 1rem;
   display: -webkit-flex; display: flex; -webkit-flex-direction: column; flex-direction: column;
 }
 .wx-row { display: -webkit-flex; display: flex; }
 .wx-row + .wx-row { border-top: 1px solid var(--line); margin-top: .55rem; padding-top: .65rem; }
 .cell { -webkit-flex: 1; flex: 1; min-width: 0; text-align: center; }
-.cell-label { font-size: .9rem; line-height: 1.2rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
-.cell-icon { width: 1.9rem; height: 1.9rem; margin: .25rem auto .15rem auto; }
-.cell-temp { font-size: 1.3rem; line-height: 1.5rem; white-space: nowrap; }
+.cell-label { font-size: .9rem; line-height: 1.15rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+.cell-icon { width: 1.9rem; height: 1.9rem; margin: .2rem auto .1rem auto; }
+.cell-temp { font-size: 1.25rem; line-height: 1.4rem; white-space: nowrap; }
+.cell-temp.range { font-size: 1.1rem; }
+.cell-temp.range.tight { font-size: .92rem; }   /* for 106/94 or -18/-27 */
+.cell-sep { color: var(--muted); }
+/* Second unit, shown under the first. */
+.cell-alt { font-size: 1rem; line-height: 1.15rem; color: var(--muted); white-space: nowrap; }
+.cell-alt.tight { font-size: .85rem; }
+/* Narrow first column that says which line is which unit. */
+.cell.legend { -webkit-flex: none; flex: none; width: 1.5rem; text-align: left; }
+.legend .cell-temp, .legend .cell-alt { font-size: .8rem; font-weight: 600; color: var(--muted); }
 .cell-lo { display: block; font-size: 1.05rem; line-height: 1.25rem; color: var(--muted); }
-.cell-pop { font-size: .8rem; line-height: 1.1rem; height: 1.1rem; color: var(--muted); }
+.cell-pop { font-size: .8rem; line-height: 1.05rem; height: 1.05rem; color: var(--muted); }
 svg.ic { display: block; width: 100%; height: 100%; }
 
 /* Calendar */
@@ -215,11 +227,15 @@ svg.ic { display: block; width: 100%; height: 100%; }
 
     <div class="wx">
       <div class="wx-now">
-        <div class="wx-main"><div class="wx-icon" id="wxIcon"></div><div class="num wx-temp" id="wxTemp"></div></div>
+        <div class="wx-main">
+          <div class="wx-icon" id="wxIcon"></div>
+          <div>
+            <div class="num wx-temp" id="wxTempRow"><span id="wxTemp"></span><span class="wx-unit" id="wxUnit"></span></div>
+            <div class="num wx-temp2" id="wxTemp2"></div>
+          </div>
+        </div>
         <div class="wx-desc" id="wxDesc"></div>
-        <div class="wx-sub" id="wxSub1"></div>
-        <div class="wx-sub" id="wxSub2"></div>
-        <div class="wx-sub" id="wxSub3"></div>
+        <div id="wxSubs"></div>
       </div>
       <div class="wx-fc">
         <div class="wx-row" id="wxHours"></div>
@@ -263,7 +279,7 @@ var CONFIG = {
     { name: 'Copenhagen', zone: 'eu-central' }
   ],
   hour12: true,               /* false gives 17:50 instead of 5:50 pm */
-  fahrenheit: true,           /* false gives Celsius and km/h */
+  temperature: 'C',         /* 'F+C', 'C+F', 'F' or 'C'. The first unit is the larger one. */
   weatherMinutes: 20,         /* how often to fetch the weather */
   calendarMinutes: 5,         /* how often to fetch the calendar */
   dimFrom: 23 * 60,           /* nearly-black screen from 11:00 pm ... */
@@ -505,7 +521,23 @@ function describe(code, isDay) {
   }
   return { text: '', icon: '' };
 }
-function deg(v) { return (typeof v === 'number' && isFinite(v)) ? Math.round(v) + '\u00B0' : '\u2013'; }
+/* The weather is always fetched in Fahrenheit and mph; other units are worked out here. */
+function tempUnits() {
+  var t = String(CONFIG.temperature || 'F').toUpperCase().split('+');
+  var a = t[0] === 'C' ? 'C' : 'F';
+  return { a: a, b: ((t[1] === 'C' || t[1] === 'F') && t[1] !== a) ? t[1] : '' };
+}
+function hasTemp(f) { return typeof f === 'number' && isFinite(f); }
+function tnum(f, unit) { return hasTemp(f) ? String(Math.round(unit === 'C' ? (f - 32) / 1.8 : f)) : '\u2013'; }
+function tdeg(f, unit) { return tnum(f, unit) + (hasTemp(f) ? '\u00B0' : ''); }
+/* "54\u00B0F / 12\u00B0C", or just "54\u00B0F" when only one unit is wanted. */
+function tpair(f, u) { return hasTemp(f) ? tdeg(f, u.a) + u.a + (u.b ? ' / ' + tdeg(f, u.b) + u.b : '') : '\u2013'; }
+function setLines(box, lines) {
+  var key = lines.join('\n'), i;
+  if (box.__k === key) { return; }
+  box.__k = key; clear(box);
+  for (i = 0; i < lines.length; i++) { box.appendChild(el('div', 'wx-sub', lines[i])); }
+}
 function at(list, i) { return (list && i >= 0 && i < list.length) ? list[i] : undefined; }
 
 var weather = null;          /* { at: when fetched, data: reply from the weather service } */
@@ -516,7 +548,7 @@ function weatherUrl() {
     '&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,is_day' +
     '&hourly=temperature_2m,weather_code,precipitation_probability,is_day' +
     '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset' +
-    (CONFIG.fahrenheit ? '&temperature_unit=fahrenheit&wind_speed_unit=mph' : '') +
+    '&temperature_unit=fahrenheit&wind_speed_unit=mph' +
     '&timezone=' + tzName + '&forecast_days=8&timeformat=unixtime';
 }
 function loadWeather() {
@@ -531,21 +563,48 @@ function loadWeather() {
     paintTheme(wall(CONFIG.home.zone, ms));
   });
 }
-function forecastCell(label, iconName, tempNode, pop) {
-  var c = el('div', 'cell'), ic = el('div', 'cell-icon');
+function forecastCell(label, iconName, lines, pop) {
+  var c = el('div', 'cell'), ic = el('div', 'cell-icon'), i;
   c.appendChild(el('div', 'cell-label', label));
   ic.innerHTML = iconName ? icon(iconName) : '';
   c.appendChild(ic);
-  c.appendChild(tempNode);
+  for (i = 0; i < lines.length; i++) { c.appendChild(lines[i]); }
   c.appendChild(el('div', 'cell-pop', (typeof pop === 'number' && pop >= 20) ? Math.round(pop) + '%' : ''));
   return c;
 }
+/* With two units, each forecast row starts with a small column naming the two lines. */
+function legendCell(u) {
+  var c = el('div', 'cell legend');
+  c.appendChild(el('div', 'cell-label', '\u00A0'));
+  c.appendChild(el('div', 'cell-icon'));
+  c.appendChild(el('div', 'cell-temp', '\u00B0' + u.a));
+  c.appendChild(el('div', 'cell-alt', '\u00B0' + u.b));
+  return c;
+}
+/* One hour: "53" over "12" with two units, "53\u00B0" with one. */
+function hourLines(f, u) {
+  if (!u.b) { return [el('div', 'cell-temp num', tdeg(f, u.a))]; }
+  return [el('div', 'cell-temp num', tnum(f, u.a)), el('div', 'cell-alt num', tnum(f, u.b))];
+}
+/* One day: "44/32" over "7/0" with two units, high over low with one. */
+function dayLines(hi, lo, u) {
+  var first, a, b;
+  if (!u.b) {
+    first = el('div', 'cell-temp num', tdeg(hi, u.a));
+    first.appendChild(el('span', 'cell-lo', tdeg(lo, u.a)));
+    return [first];
+  }
+  a = tnum(hi, u.a) + '/' + tnum(lo, u.a); b = tnum(hi, u.b) + '/' + tnum(lo, u.b);
+  first = el('div', 'cell-temp range num' + (a.length > 5 ? ' tight' : ''), tnum(hi, u.a));
+  first.appendChild(el('span', 'cell-sep', '/' + tnum(lo, u.a)));
+  return [first, el('div', 'cell-alt num' + (b.length > 5 ? ' tight' : ''), b)];
+}
 function paintWeather(ms) {
   var stamp = byId('wxStamp'), hours = byId('wxHours'), days = byId('wxDays');
-  var home = wall(CONFIG.home.zone, ms), d, cur, H, D, off, i, hi = -1, di = -1, fresh, temp, code, isDay, info, k, idx, w, t, hiLo, stale, riseW, setW;
+  var home = wall(CONFIG.home.zone, ms), u = tempUnits(), lines = [], d, cur, H, D, off, i, hi = -1, di = -1, fresh, temp, code, isDay, info, k, idx, w, t, txt, stale, riseW, setW;
   clear(hours); clear(days);
   if (!weather) {
-    setHTML(byId('wxIcon'), ''); setText(byId('wxTemp'), ''); setText(byId('wxSub1'), ''); setText(byId('wxSub2'), ''); setText(byId('wxSub3'), '');
+    setHTML(byId('wxIcon'), ''); setText(byId('wxTemp'), ''); setText(byId('wxUnit'), ''); setText(byId('wxTemp2'), ''); setLines(byId('wxSubs'), []);
     setText(byId('wxDesc'), wxError ? 'Weather isn\u2019t loading' : 'Loading weather');
     setText(stamp, wxError ? 'Can\u2019t reach the weather service. Check the Wi-Fi.' : '');
     stamp.className = 'stamp' + (wxError ? ' warn' : '');
@@ -564,13 +623,20 @@ function paintWeather(ms) {
   if (isDay === undefined) { isDay = (home.min > sun.rise && home.min < sun.set) ? 1 : 0; }
   info = describe(code, !!isDay);
   setHTML(byId('wxIcon'), info.icon ? icon(info.icon) : '');
-  setText(byId('wxTemp'), deg(temp));
+  txt = tnum(temp, u.a);
+  setText(byId('wxTemp'), tdeg(temp, u.a));
+  setText(byId('wxUnit'), hasTemp(temp) ? u.a : '');
+  byId('wxTempRow').className = 'num wx-temp' + (txt.length > 2 ? ' long' : '');   /* 100 or -10 need a smaller size */
+  setText(byId('wxTemp2'), (u.b && hasTemp(temp)) ? tdeg(temp, u.b) + u.b : '');
   setText(byId('wxDesc'), info.text);
-  setText(byId('wxSub1'), (fresh && typeof cur.apparent_temperature === 'number')
-    ? 'Feels like ' + deg(cur.apparent_temperature) + (typeof cur.wind_speed_10m === 'number' ? ', wind ' + Math.round(cur.wind_speed_10m) + (CONFIG.fahrenheit ? ' mph' : ' km/h') : '')
-    : '');
-  hiLo = di >= 0 ? 'High ' + deg(at(D.temperature_2m_max, di)) + ', low ' + deg(at(D.temperature_2m_min, di)) : '';
-  setText(byId('wxSub2'), hiLo);
+  if (fresh && hasTemp(cur.apparent_temperature)) { lines.push('Feels like ' + tpair(cur.apparent_temperature, u)); }
+  if (di >= 0) {
+    lines.push('High ' + tpair(at(D.temperature_2m_max, di), u));
+    lines.push('Low ' + tpair(at(D.temperature_2m_min, di), u));
+  }
+  if (fresh && hasTemp(cur.wind_speed_10m)) {
+    lines.push('Wind ' + (u.a === 'C' ? Math.round(cur.wind_speed_10m * 1.609344) + ' km/h' : Math.round(cur.wind_speed_10m) + ' mph'));
+  }
   t = '';
   if (di >= 0 && at(D.sunrise, di) && at(D.sunset, di)) {
     riseW = wall(CONFIG.home.zone, D.sunrise[di] * 1000); setW = wall(CONFIG.home.zone, D.sunset[di] * 1000);
@@ -578,24 +644,24 @@ function paintWeather(ms) {
     t = home.min < riseW.min ? 'Sunrise ' + clockText(riseW.h, riseW.mi) : (home.min < setW.min ? 'Sunset ' + clockText(setW.h, setW.mi) : '');
     if (!t && at(D.sunrise, di + 1)) { w = wall(CONFIG.home.zone, D.sunrise[di + 1] * 1000); t = 'Sunrise ' + clockText(w.h, w.mi); }
   }
-  setText(byId('wxSub3'), t);
+  if (t) { lines.push(t); }
+  setLines(byId('wxSubs'), lines);
 
   /* Next twelve hours, every second hour. */
+  if (u.b) { hours.appendChild(legendCell(u)); days.appendChild(legendCell(u)); }
   for (k = 0; k < 6; k++) {
     idx = hi >= 0 ? hi + 1 + 2 * k : -1;
     if (at(H.time, idx) === undefined) { hours.appendChild(el('div', 'cell')); continue; }
     w = wall(CONFIG.home.zone, H.time[idx] * 1000);
     info = describe(at(H.weather_code, idx), !!at(H.is_day, idx));
-    hours.appendChild(forecastCell(hourText(w.h), info.icon, el('div', 'cell-temp num', deg(at(H.temperature_2m, idx))), at(H.precipitation_probability, idx)));
+    hours.appendChild(forecastCell(hourText(w.h), info.icon, hourLines(at(H.temperature_2m, idx), u), at(H.precipitation_probability, idx)));
   }
   /* Next six days. */
   for (k = 1; k <= 6; k++) {
     idx = di >= 0 ? di + k : -1;
     if (at(D.time, idx) === undefined) { days.appendChild(el('div', 'cell')); continue; }
     info = describe(at(D.weather_code, idx), true);
-    t = el('div', 'cell-temp num', deg(at(D.temperature_2m_max, idx)));
-    t.appendChild(el('span', 'cell-lo', deg(at(D.temperature_2m_min, idx))));
-    days.appendChild(forecastCell(WD_SHORT[weekdayOf(home.dayNum + k)], info.icon, t, at(D.precipitation_probability_max, idx)));
+    days.appendChild(forecastCell(WD_SHORT[weekdayOf(home.dayNum + k)], info.icon, dayLines(at(D.temperature_2m_max, idx), at(D.temperature_2m_min, idx), u), at(D.precipitation_probability_max, idx)));
   }
 
   stale = (ms - weather.at) > 3 * CONFIG.weatherMinutes * MIN;
